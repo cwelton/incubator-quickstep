@@ -2249,6 +2249,10 @@ void HashTable<ValueT, resizable, serializable, force_key_copy, allow_duplicate_
   InvokeOnAnyValueAccessor(
       accessor,
       [&](auto *accessor) -> void {  // NOLINT(build/c++11)
+    auto *container = simple_profiler.getContainer();
+    const int op_index = container->getContext();
+    auto *hash_probe_line = container->getEventLine(op_index + 100);
+    hash_probe_line->emplace_back();
     std::unique_ptr<BloomFilterAdapter> bloom_filter_adapter;
     if (has_probe_side_bloom_filter_) {
       bloom_filter_adapter.reset(
@@ -2279,16 +2283,14 @@ void HashTable<ValueT, resizable, serializable, force_key_copy, allow_duplicate_
         }
       }
     }
-    auto *container = simple_profiler.getContainer();
-    const int op_index = container->getContext();
-    auto *hash_probe_line = container->getEventLine(op_index + 100);
-    hash_probe_line->emplace_back();
     hash_probe_line->back().endEvent();
     hash_probe_line->back().setPayload(hash_probe_cnt);
-    auto *bloom_probe_line = container->getEventLine(op_index + 200);
-    bloom_probe_line->emplace_back();
-    bloom_probe_line->back().endEvent();
-    bloom_probe_line->back().setPayload(bloom_probe_cnt);
+    if (bloom_probe_cnt > 0) {
+      auto *bloom_probe_line = container->getEventLine(op_index + 200);
+      bloom_probe_line->emplace_back();
+      bloom_probe_line->back().endEvent();
+      bloom_probe_line->back().setPayload(bloom_probe_cnt);
+    }
   });
 }
 
