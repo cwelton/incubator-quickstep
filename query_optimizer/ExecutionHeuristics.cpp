@@ -17,6 +17,7 @@
 
 #include "query_optimizer/ExecutionHeuristics.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <utility>
 #include <unordered_map>
@@ -38,6 +39,9 @@ DEFINE_int32(bloom_num_bits_per_tuple, kNumBitsPerByte,
 
 DEFINE_int32(bloom_num_hash_fns, 3,
     "Number of hash functions used in the Bloom filter.");
+
+DEFINE_bool(reverse_bloom_filter_order, false,
+    "Reverse the initial ordering of bloom filters.");
 
 void ExecutionHeuristics::optimizeExecutionPlan(QueryPlan *query_plan,
                                                 serialization::QueryContext *query_context_proto) {
@@ -72,6 +76,7 @@ void ExecutionHeuristics::optimizeExecutionPlan(QueryPlan *query_plan,
     // Only chains of length greater than one are suitable candidates for semi-join optimization.
     if (chained_nodes.size() > 1) {
       std::unordered_map<QueryContext::bloom_filter_id, std::vector<attribute_id>> probe_bloom_filter_info;
+      std::vector<QueryContext::bloom_filter_id> bloom_filter_ids;
       for (const std::size_t node : chained_nodes) {
         if (!hash_joins_[node].is_selection_) {
           continue;
@@ -89,16 +94,21 @@ void ExecutionHeuristics::optimizeExecutionPlan(QueryPlan *query_plan,
             ->add_build_side_bloom_filter_id(bloom_filter_id);
 
         probe_bloom_filter_info.insert(std::make_pair(bloom_filter_id, hash_joins_[node].probe_attributes_));
+        bloom_filter_ids.emplace_back(bloom_filter_id);
       }
 
       // Add probe-side bloom filter information to the corresponding hash table proto for each build-side bloom filter.
-      for (const std::pair<QueryContext::bloom_filter_id, std::vector<attribute_id>>
-               &bloom_filter_info : probe_bloom_filter_info) {
+      std::sort(bloom_filter_ids.begin(), bloom_filter_ids.end());
+      if (FLAGS_reverse_bloom_filter_order) {
+        std::reverse(bloom_filter_ids.begin(), bloom_filter_ids.end());
+      }
+      for (const auto bf_id : bloom_filter_ids) {
+        const auto &bloom_filter_info = probe_bloom_filter_info[bf_id];
         auto *probe_side_bloom_filter =
             query_context_proto->mutable_join_hash_tables(hash_joins_[origin_node].join_hash_table_id_)
                                   ->add_probe_side_bloom_filters();
-        probe_side_bloom_filter->set_probe_side_bloom_filter_id(bloom_filter_info.first);
-        for (const attribute_id &probe_attribute_id : bloom_filter_info.second) {
+        probe_side_bloom_filter->set_probe_side_bloom_filter_id(bf_id);
+        for (const attribute_id &probe_attribute_id : bloom_filter_info) {
           probe_side_bloom_filter->add_probe_side_attr_ids(probe_attribute_id);
         }
       }

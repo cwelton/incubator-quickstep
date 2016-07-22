@@ -59,13 +59,17 @@ class BloomFilterAdapter {
   }
 
   template <typename ValueAccessorT, bool adapt_filters = true>
-  std::size_t bulkProbe(
+  inline std::size_t bulkProbe(
       const ValueAccessorT *accessor,
       std::vector<tuple_id> &batch) {
     std::size_t out_size = batch.size();
-    for (auto &entry : bloom_filter_entries_)
-      out_size = bulkProbeBloomFilterEntry(*entry, accessor, batch, out_size);
-    adaptEntryOrder();
+    for (auto &entry : bloom_filter_entries_) {
+      out_size = bulkProbeBloomFilterEntry<ValueAccessorT, adapt_filters>(
+          *entry, accessor, batch, out_size);
+    }
+    if (adapt_filters) {
+      adaptEntryOrder();
+    }
     return out_size;
   }
 
@@ -81,7 +85,7 @@ class BloomFilterAdapter {
           cnt(0) {
     }
 
-    static bool isBetterThan(const BloomFilterEntry *a,
+    static inline bool isBetterThan(const BloomFilterEntry *a,
                              const BloomFilterEntry *b) {
       return a->miss_rate > b->miss_rate;
       // return static_cast<std::uint64_t>(a.miss) * b.cnt
@@ -97,7 +101,7 @@ class BloomFilterAdapter {
   };
 
   template <typename ValueAccessorT, bool adapt_filters = true>
-  std::size_t bulkProbeBloomFilterEntry(
+  inline std::size_t bulkProbeBloomFilterEntry(
       BloomFilterEntry &entry,
       const ValueAccessorT *accessor,
       std::vector<tuple_id> &batch,
@@ -125,7 +129,7 @@ class BloomFilterAdapter {
     return out_size;
   }
 
-  void adaptEntryOrder() {
+  inline void adaptEntryOrder() {
     for (auto &entry : bloom_filter_entries_)
       entry->miss_rate = static_cast<float>(entry->miss) / entry->cnt;
     std::sort(bloom_filter_entries_.begin(),

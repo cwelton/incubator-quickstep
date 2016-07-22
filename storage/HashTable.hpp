@@ -47,6 +47,7 @@
 namespace quickstep {
 
 DECLARE_int64(bloom_adapter_batch_size);
+DECLARE_bool(adapt_bloom_filters);
 
 /** \addtogroup Storage
  *  @{
