@@ -2290,10 +2290,16 @@ void HashTable<ValueT, resizable, serializable, force_key_copy, allow_duplicate_
         std::uint32_t batch_size =
             batch_size_try > num_tuples_left ? batch_size_try : num_tuples_left;
         batch.reserve(batch_size);
-        while (batch.size() < batch_size && accessor->next())
+        while (batch.size() < batch_size && accessor->next()) {
           batch.push_back(accessor->getCurrentPosition());
+        }
 
-        std::size_t num_hits = bloom_filter_adapter->bulkProbe(accessor, batch);
+        std::size_t num_hits;
+        if (FLAGS_adapt_bloom_filters) {
+          num_hits = bloom_filter_adapter->bulkProbe<true>(accessor, batch);
+        } else {
+          num_hits = bloom_filter_adapter->bulkProbe<false>(accessor, batch);
+        }
 
         for (std::size_t t = 0; t < num_hits; ++t){
           tuple_id probe_tid = batch[t];

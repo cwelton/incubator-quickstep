@@ -61,7 +61,7 @@ namespace quickstep {
 
 DEFINE_int64(bloom_adapter_batch_size, 4000,
              "Number of tuples to probe in bulk in Bloom filter adapter.");
-DEFINE_bool(adapt_bloom_filter, true,
+DEFINE_bool(adapt_bloom_filters, true,
              "Whether to adaptively adjust the ordering of bloom filters.");
 
 namespace {

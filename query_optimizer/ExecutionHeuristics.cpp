@@ -78,9 +78,9 @@ void ExecutionHeuristics::optimizeExecutionPlan(QueryPlan *query_plan,
       std::unordered_map<QueryContext::bloom_filter_id, std::vector<attribute_id>> probe_bloom_filter_info;
       std::vector<QueryContext::bloom_filter_id> bloom_filter_ids;
       for (const std::size_t node : chained_nodes) {
-        if (!hash_joins_[node].is_selection_) {
-          continue;
-        }
+//        if (!hash_joins_[node].is_selection_) {
+//          continue;
+//        }
 
         // Provision for a new bloom filter to be used by the build operator.
         const QueryContext::bloom_filter_id bloom_filter_id = query_context_proto->bloom_filters_size();
