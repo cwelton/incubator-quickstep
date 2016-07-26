@@ -41,11 +41,13 @@
 #include "types/TypedValue.hpp"
 #include "utility/BloomFilter.hpp"
 #include "utility/BloomFilterAdapter.hpp"
-#include "utility/EventProfiler.hpp"
 #include "utility/HashPair.hpp"
 #include "utility/Macros.hpp"
 
 namespace quickstep {
+
+DECLARE_int64(bloom_adapter_batch_size);
+DECLARE_bool(adapt_bloom_filters);
 
 /** \addtogroup Storage
  *  @{
@@ -1482,8 +1484,7 @@ HashTablePutResult HashTable<ValueT, resizable, serializable, force_key_copy, al
     }
     std::unique_ptr<BloomFilter> thread_local_bloom_filter;
     if (has_build_side_bloom_filter_) {
-      thread_local_bloom_filter.reset(new BloomFilter(build_bloom_filter_->getRandomSeed(),
-                                                      build_bloom_filter_->getNumberOfHashes(),
+      thread_local_bloom_filter.reset(new BloomFilter(build_bloom_filter_->getNumberOfHashes(),
                                                       build_bloom_filter_->getBitArraySize()));
     }
     if (resizable) {
@@ -2232,6 +2233,7 @@ inline std::size_t HashTable<ValueT, resizable, serializable, force_key_copy, al
   }
 }
 
+
 template <typename ValueT,
           bool resizable,
           bool serializable,
@@ -2249,47 +2251,97 @@ void HashTable<ValueT, resizable, serializable, force_key_copy, allow_duplicate_
   InvokeOnAnyValueAccessor(
       accessor,
       [&](auto *accessor) -> void {  // NOLINT(build/c++11)
-    auto *container = simple_profiler.getContainer();
-    const int op_index = container->getContext();
-    auto *hash_probe_line = container->getEventLine(op_index + 100);
-    hash_probe_line->emplace_back();
     std::unique_ptr<BloomFilterAdapter> bloom_filter_adapter;
     if (has_probe_side_bloom_filter_) {
-      bloom_filter_adapter.reset(
-          new BloomFilterAdapter(probe_bloom_filters_, probe_attribute_ids_));
-    }
-    int hash_probe_cnt = 0;
-    int bloom_probe_cnt = 0;
-    while (accessor->next()) {
-      if (has_probe_side_bloom_filter_ && bloom_filter_adapter->miss(accessor, &bloom_probe_cnt)) {
-        continue;  // On a bloom filter miss, probing the hash table can be skipped.
+
+      // Find (and cache) the size of each attribute in the probe lists.
+      // NOTE(nav): This code uses the accessor to get the size,
+      // and hence only works if there's at least one tuple.
+      std::vector<std::vector<std::size_t>> attr_size_vectors;
+      attr_size_vectors.reserve(probe_attribute_ids_.size());
+      for (const auto &probe_attr_vector : probe_attribute_ids_) {
+        std::vector<std::size_t> attr_sizes;
+        attr_sizes.reserve(probe_attr_vector.size());
+        for (const auto &probe_attr : probe_attr_vector) {
+          // Using the function below is the easiest way to get attribute size
+          // here. The template parameter check_null is set to false to ensure
+          // that we get the size even if the first attr value is null.
+          auto val_and_size = accessor->template getUntypedValueAndByteLengthAtAbsolutePosition<false>(0, probe_attr);
+          attr_sizes.push_back(val_and_size.second);
+        }
+        attr_size_vectors.push_back(attr_sizes);
       }
 
-      ++hash_probe_cnt;
-      TypedValue key = accessor->getTypedValue(key_attr_id);
-      if (check_for_null_keys && key.isNull()) {
-        continue;
-      }
-      const std::size_t true_hash = use_scalar_literal_hash_template ? key.getHashScalarLiteral()
-                                                                     : key.getHash();
-      const std::size_t adjusted_hash = adjust_hashes_template ? this->AdjustHash(true_hash)
-                                                               : true_hash;
-      std::size_t entry_num = 0;
-      const ValueT *value;
-      while (this->getNextEntryForKey(key, adjusted_hash, &value, &entry_num)) {
-        (*functor)(*accessor, *value);
-        if (!allow_duplicate_keys) {
-          break;
+      bloom_filter_adapter.reset(new BloomFilterAdapter(
+              probe_bloom_filters_, probe_attribute_ids_, attr_size_vectors));
+
+      // We want to have large batch sizes for cache efficiency while probeing,
+      // but small batch sizes to ensure that the adaptation logic kicks in
+      // (and does early). We use exponentially increasing batch sizes to
+      // achieve a balance between the two.
+      //
+      // We also keep track of num_tuples_left in the block, to ensure that
+      // we don't reserve an unnecessarily large vector.
+      std::uint32_t batch_size_try = FLAGS_bloom_adapter_batch_size;
+      std::uint32_t num_tuples_left = accessor->getNumTuples();
+      std::vector<tuple_id> batch(num_tuples_left);
+
+      do {
+        const std::uint32_t batch_size =
+            batch_size_try < num_tuples_left ? batch_size_try : num_tuples_left;
+        for (std::size_t i = 0; i < batch_size; ++i) {
+          accessor->next();
+          batch.push_back(accessor->getCurrentPosition());
+        }
+
+        std::size_t num_hits;
+        if (FLAGS_adapt_bloom_filters) {
+          num_hits = bloom_filter_adapter->bulkProbe<true>(accessor, batch);
+        } else {
+          num_hits = bloom_filter_adapter->bulkProbe<false>(accessor, batch);
+        }
+
+        for (std::size_t i = 0; i < num_hits; ++i){
+          const tuple_id probe_tid = batch[i];
+          TypedValue key = accessor->getTypedValueAtAbsolutePosition(key_attr_id, probe_tid);
+          if (check_for_null_keys && key.isNull()) {
+            continue;
+          }
+          const std::size_t true_hash = use_scalar_literal_hash_template ? key.getHashScalarLiteral()
+                                                                        : key.getHash();
+          const std::size_t adjusted_hash = adjust_hashes_template ? this->AdjustHash(true_hash)
+                                                                  : true_hash;
+          std::size_t entry_num = 0;
+          const ValueT *value;
+          while (this->getNextEntryForKey(key, adjusted_hash, &value, &entry_num)) {
+            (*functor)(probe_tid, *value);
+            if (!allow_duplicate_keys)
+              break;
+          }
+        }
+        num_tuples_left -= batch_size;
+        batch_size_try = batch_size * 2;
+      } while (!accessor->iterationFinished());
+    }
+
+    else { // no Bloom filters to probe
+      while(accessor->next()) {
+        TypedValue key = accessor->getTypedValue(key_attr_id);
+        if (check_for_null_keys && key.isNull()) {
+          continue;
+        }
+        const std::size_t true_hash = use_scalar_literal_hash_template ? key.getHashScalarLiteral()
+                                      : key.getHash();
+        const std::size_t adjusted_hash = adjust_hashes_template ? this->AdjustHash(true_hash)
+                                          : true_hash;
+        std::size_t entry_num = 0;
+        const ValueT *value;
+        while (this->getNextEntryForKey(key, adjusted_hash, &value, &entry_num)) {
+          (*functor)(*accessor, *value);
+          if (!allow_duplicate_keys)
+            break;
         }
       }
-    }
-    hash_probe_line->back().endEvent();
-    hash_probe_line->back().setPayload(hash_probe_cnt);
-    if (bloom_probe_cnt > 0) {
-      auto *bloom_probe_line = container->getEventLine(op_index + 200);
-      bloom_probe_line->emplace_back();
-      bloom_probe_line->back().endEvent();
-      bloom_probe_line->back().setPayload(bloom_probe_cnt);
     }
   });
 }

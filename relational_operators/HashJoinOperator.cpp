@@ -48,7 +48,6 @@
 #include "types/TypedValue.hpp"
 #include "types/containers/ColumnVector.hpp"
 #include "types/containers/ColumnVectorsValueAccessor.hpp"
-#include "utility/EventProfiler.hpp"
 
 #include "gflags/gflags.h"
 #include "glog/logging.h"
@@ -59,6 +58,11 @@ using std::unique_ptr;
 using std::vector;
 
 namespace quickstep {
+
+DEFINE_int64(bloom_adapter_batch_size, 64,
+             "Number of tuples to probe in bulk in Bloom filter adapter.");
+DEFINE_bool(adapt_bloom_filters, true,
+            "Whether to adaptively adjust the ordering of bloom filters.");
 
 namespace {
 
@@ -74,6 +78,11 @@ class MapBasedJoinedTupleCollector {
   inline void operator()(const ValueAccessorT &accessor,
                          const TupleReference &tref) {
     joined_tuples_[tref.block].emplace_back(tref.tuple, accessor.getCurrentPosition());
+  }
+
+  inline void operator()(const tuple_id probe_tid,
+                         const TupleReference &build_tref) {
+    joined_tuples_[build_tref.block].emplace_back(build_tref.tuple, probe_tid);
   }
 
   // Get a mutable pointer to the collected map of joined tuple ID pairs. The
@@ -204,8 +213,7 @@ bool HashJoinOperator::getAllNonOuterJoinWorkOrders(
                                      selection,
                                      hash_table,
                                      output_destination,
-                                     storage_manager,
-                                     op_index_),
+                                     storage_manager),
               op_index_);
         }
         started_ = true;
@@ -225,8 +233,7 @@ bool HashJoinOperator::getAllNonOuterJoinWorkOrders(
                 selection,
                 hash_table,
                 output_destination,
-                storage_manager,
-                op_index_),
+                storage_manager),
             op_index_);
         ++num_workorders_generated_;
       }  // end while
@@ -423,8 +430,6 @@ void HashInnerJoinWorkOrder::execute() {
   BlockReference probe_block(
       storage_manager_->getBlock(block_id_, probe_relation_));
   const TupleStorageSubBlock &probe_store = probe_block->getTupleStorageSubBlock();
-  auto *container = simple_profiler.getContainer();
-  container->setContext(getOperatorIndex());
 
   std::unique_ptr<ValueAccessor> probe_accessor(probe_store.createValueAccessor());
   MapBasedJoinedTupleCollector collector;
@@ -445,7 +450,6 @@ void HashInnerJoinWorkOrder::execute() {
   const relation_id build_relation_id = build_relation_.getID();
   const relation_id probe_relation_id = probe_relation_.getID();
 
-  auto *output_line = container->getEventLine(getOperatorIndex());
   for (std::pair<const block_id, std::vector<std::pair<tuple_id, tuple_id>>>
            &build_block_entry : *collector.getJoinedTuples()) {
     BlockReference build_block =
@@ -507,9 +511,6 @@ void HashInnerJoinWorkOrder::execute() {
                                                                   probe_accessor.get(),
                                                                   build_block_entry.second));
     }
-    output_line->emplace_back();
-    output_line->back().endEvent();
-    output_line->back().setPayload(temp_result.getNumTuples());
 
     // NOTE(chasseur): calling the bulk-insert method of InsertDestination once
     // for each pair of joined blocks incurs some extra overhead that could be
