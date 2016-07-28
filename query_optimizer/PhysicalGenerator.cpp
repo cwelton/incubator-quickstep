@@ -114,7 +114,6 @@ P::PhysicalPtr PhysicalGenerator::optimizePlan() {
     quickstep::PlanVisualizer plan_visualizer;
     std::cerr << "\n" << plan_visualizer.visualize(physical_plan_) << "\n";
   }
-  exit(0);
 
 #ifdef QUICKSTEP_DEBUG
   Validate(physical_plan_);

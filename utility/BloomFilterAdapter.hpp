@@ -40,8 +40,8 @@ namespace quickstep {
 class BloomFilterAdapter {
  public:
   BloomFilterAdapter(const std::vector<const BloomFilter*> &bloom_filters,
-                     const std::vector<std::vector<attribute_id>> attribute_ids,
-                     const std::vector<std::vector<std::size_t>> attr_sizes) {
+                     const std::vector<attribute_id> &attribute_ids,
+                     const std::vector<std::size_t> &attr_sizes) {
     DCHECK_EQ(bloom_filters.size(), attribute_ids.size());
     DCHECK_EQ(bloom_filters.size(), attr_sizes.size());
 
@@ -64,7 +64,7 @@ class BloomFilterAdapter {
                                std::vector<tuple_id> &batch) {
     std::size_t out_size = batch.size();
     for (auto &entry : bloom_filter_entries_) {
-      out_size = bulkProbeBloomFilterEntry(*entry, accessor, batch, out_size);
+      out_size = bulkProbeBloomFilterEntry<adapt_filters>(*entry, accessor, batch, out_size);
     }
     adaptEntryOrder();
     return out_size;
@@ -73,11 +73,11 @@ class BloomFilterAdapter {
  private:
   struct BloomFilterEntry {
     BloomFilterEntry(const BloomFilter *in_bloom_filter,
-                     const std::vector<attribute_id> &in_attribute_ids,
-                     const std::vector<std::size_t> &in_attribute_sizes)
+                     const attribute_id &in_attribute_id,
+                     const std::size_t &in_attribute_size)
         : bloom_filter(in_bloom_filter),
-          attribute_ids(in_attribute_ids),
-          attribute_sizes(in_attribute_sizes),
+          attribute_id(in_attribute_id),
+          attribute_size(in_attribute_size),
           miss(0),
           cnt(0) {
     }
@@ -88,8 +88,8 @@ class BloomFilterAdapter {
     }
 
     const BloomFilter *bloom_filter;
-    const std::vector<attribute_id> attribute_ids;
-    const std::vector<std::size_t> attribute_sizes;
+    const attribute_id attribute_id;
+    const std::size_t attribute_size;
     std::uint32_t miss;
     std::uint32_t cnt;
     float miss_rate;
@@ -105,16 +105,12 @@ class BloomFilterAdapter {
     const BloomFilter *bloom_filter = entry.bloom_filter;
 
     for (std::size_t t = 0; t < in_size; ++t) {
-      tuple_id tid = batch[t];
-      for (std::size_t a = 0; a < entry.attribute_ids.size(); ++a) {
-        const attribute_id &attr_id = entry.attribute_ids[a];
-        const std::size_t size = entry.attribute_sizes[a];
-        const auto value = static_cast<const std::uint8_t*>(
-            accessor->getUntypedValueAtAbsolutePosition(attr_id, tid));
-        if (bloom_filter->contains(value, size)) {
-          batch[out_size] = tid;
-          ++out_size;
-        }
+      const tuple_id tid = batch[t];
+      const auto value = static_cast<const std::uint8_t*>(
+          accessor->getUntypedValueAtAbsolutePosition(entry.attribute_id, tid));
+      if (bloom_filter->contains(value, entry.attribute_size)) {
+        batch[out_size] = tid;
+        ++out_size;
       }
     }
     if (adapt_filters) {

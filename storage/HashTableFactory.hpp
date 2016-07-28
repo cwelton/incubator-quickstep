@@ -318,9 +318,11 @@ class HashTableFactory {
     //                 individual implementations of the hash table constructors.
 
     // Check if there are any build side bloom filter defined on the hash table.
-    if (proto.build_side_bloom_filter_id_size() > 0) {
+    if (proto.build_side_bloom_filters_size() > 0) {
+      CHECK_EQ(1u, proto.build_side_bloom_filters_size());
       hash_table->enableBuildSideBloomFilter();
-      hash_table->setBuildSideBloomFilter(bloom_filters[proto.build_side_bloom_filter_id(0)].get());
+      hash_table->setBuildSideBloomFilter(
+          bloom_filters[proto.build_side_bloom_filters(0).bloom_filter_id()].get());
     }
 
     // Check if there are any probe side bloom filters defined on the hash table.
@@ -330,15 +332,11 @@ class HashTableFactory {
       for (int j = 0; j < proto.probe_side_bloom_filters_size(); ++j) {
         // Add the pointer to the probe bloom filter within the list of probe bloom filters to use.
         const auto probe_side_bloom_filter = proto.probe_side_bloom_filters(j);
-        hash_table->addProbeSideBloomFilter(bloom_filters[probe_side_bloom_filter.probe_side_bloom_filter_id()].get());
+        hash_table->addProbeSideBloomFilter(
+            bloom_filters[probe_side_bloom_filter.bloom_filter_id()].get());
 
         // Add the attribute ids corresponding to this probe bloom filter.
-        std::vector<attribute_id> probe_attribute_ids;
-        for (int k = 0; k < probe_side_bloom_filter.probe_side_attr_ids_size(); ++k) {
-          const attribute_id probe_attribute_id = probe_side_bloom_filter.probe_side_attr_ids(k);
-          probe_attribute_ids.push_back(probe_attribute_id);
-        }
-        hash_table->addProbeSideAttributeIds(std::move(probe_attribute_ids));
+        hash_table->addProbeSideAttributeIds(probe_side_bloom_filter.attr_id());
       }
     }
 

@@ -41,6 +41,7 @@
 #include "types/TypedValue.hpp"
 #include "utility/BloomFilter.hpp"
 #include "utility/BloomFilterAdapter.hpp"
+#include "utility/EventProfiler.hpp"
 #include "utility/HashPair.hpp"
 #include "utility/Macros.hpp"
 
@@ -1047,8 +1048,8 @@ class HashTable : public HashTableBase<resizable,
    * @param probe_attribute_ids The vector of attribute ids to use for probing
    *        the bloom filter.
    **/
-  inline void addProbeSideAttributeIds(std::vector<attribute_id> &&probe_attribute_ids) {
-    probe_attribute_ids_.push_back(probe_attribute_ids);
+  inline void addProbeSideAttributeIds(const attribute_id &probe_attribute_id) {
+    probe_attribute_ids_.push_back(probe_attribute_id);
   }
 
  protected:
@@ -1336,7 +1337,7 @@ class HashTable : public HashTableBase<resizable,
   bool has_probe_side_bloom_filter_ = false;
   BloomFilter *build_bloom_filter_;
   std::vector<const BloomFilter*> probe_bloom_filters_;
-  std::vector<std::vector<attribute_id>> probe_attribute_ids_;
+  std::vector<attribute_id> probe_attribute_ids_;
 
   DISALLOW_COPY_AND_ASSIGN(HashTable);
 };
@@ -2257,23 +2258,16 @@ void HashTable<ValueT, resizable, serializable, force_key_copy, allow_duplicate_
       // Find (and cache) the size of each attribute in the probe lists.
       // NOTE(nav): This code uses the accessor to get the size,
       // and hence only works if there's at least one tuple.
-      std::vector<std::vector<std::size_t>> attr_size_vectors;
-      attr_size_vectors.reserve(probe_attribute_ids_.size());
-      for (const auto &probe_attr_vector : probe_attribute_ids_) {
-        std::vector<std::size_t> attr_sizes;
-        attr_sizes.reserve(probe_attr_vector.size());
-        for (const auto &probe_attr : probe_attr_vector) {
-          // Using the function below is the easiest way to get attribute size
-          // here. The template parameter check_null is set to false to ensure
-          // that we get the size even if the first attr value is null.
-          auto val_and_size = accessor->template getUntypedValueAndByteLengthAtAbsolutePosition<false>(0, probe_attr);
-          attr_sizes.push_back(val_and_size.second);
-        }
-        attr_size_vectors.push_back(attr_sizes);
+      std::vector<std::size_t> attr_size_vector;
+      attr_size_vector.reserve(probe_attribute_ids_.size());
+      for (const auto &probe_attr : probe_attribute_ids_) {
+        auto val_and_size =
+            accessor->template getUntypedValueAndByteLengthAtAbsolutePosition<false>(0, probe_attr);
+        attr_size_vector.push_back(val_and_size.second);
       }
 
       bloom_filter_adapter.reset(new BloomFilterAdapter(
-              probe_bloom_filters_, probe_attribute_ids_, attr_size_vectors));
+              probe_bloom_filters_, probe_attribute_ids_, attr_size_vector));
 
       // We want to have large batch sizes for cache efficiency while probeing,
       // but small batch sizes to ensure that the adaptation logic kicks in
@@ -2286,6 +2280,9 @@ void HashTable<ValueT, resizable, serializable, force_key_copy, allow_duplicate_
       std::uint32_t num_tuples_left = accessor->getNumTuples();
       std::vector<tuple_id> batch(num_tuples_left);
 
+      auto *container = simple_profiler.getContainer();
+      auto *line = container->getEventLine(0);
+
       do {
         const std::uint32_t batch_size =
             batch_size_try < num_tuples_left ? batch_size_try : num_tuples_left;
@@ -2294,12 +2291,16 @@ void HashTable<ValueT, resizable, serializable, force_key_copy, allow_duplicate_
           batch.push_back(accessor->getCurrentPosition());
         }
 
+        line->emplace_back();
         std::size_t num_hits;
         if (FLAGS_adapt_bloom_filters) {
           num_hits = bloom_filter_adapter->bulkProbe<true>(accessor, batch);
         } else {
           num_hits = bloom_filter_adapter->bulkProbe<false>(accessor, batch);
         }
+        line->back().setPayload(num_hits+0);
+        line->back().endEvent();
+//        std::size_t num_hits = batch_size;
 
         for (std::size_t i = 0; i < num_hits; ++i){
           const tuple_id probe_tid = batch[i];

@@ -32,6 +32,7 @@
 #include "query_optimizer/expressions/NamedExpression.hpp"
 #include "query_optimizer/expressions/Predicate.hpp"
 #include "query_optimizer/physical/Physical.hpp"
+#include "query_optimizer/physical/HashJoin.hpp"
 #include "query_optimizer/rules/Rule.hpp"
 #include "utility/Macros.hpp"
 
@@ -76,6 +77,14 @@ class AttachBloomFilters : public Rule<physical::Physical> {
                   : source_attribute_in) {
 
     }
+    static bool isBetterThan(const BloomFilterInfo *a,
+                             const BloomFilterInfo *b) {
+      if (a->selectivity == b->selectivity) {
+        return a->depth > b->depth;
+      } else {
+        return a->selectivity < b->selectivity;
+      }
+    }
     physical::PhysicalPtr source;
     expressions::AttributeReferencePtr attribute;
     int depth;
@@ -84,14 +93,19 @@ class AttachBloomFilters : public Rule<physical::Physical> {
     expressions::AttributeReferencePtr source_attribute;
   };
 
-  void visitProducer(const physical::PhysicalPtr &node, int depth);
+  void visitProducer(const physical::PhysicalPtr &node, const int depth);
 
   void visitConsumer(const physical::PhysicalPtr &node);
+
+  physical::PhysicalPtr visitAndAttach(const physical::PhysicalPtr &node);
+
+  physical::BloomFilterConfig &getBloomFilterConfig(const physical::PhysicalPtr &node);
 
   std::unique_ptr<cost::StarSchemaSimpleCostModel> cost_model_;
 
   std::map<physical::PhysicalPtr, std::vector<BloomFilterInfo>> producers_;
   std::map<physical::PhysicalPtr, std::vector<BloomFilterInfo>> consumers_;
+  std::map<physical::PhysicalPtr, physical::BloomFilterConfig> attaches_;
 
   DISALLOW_COPY_AND_ASSIGN(AttachBloomFilters);
 };

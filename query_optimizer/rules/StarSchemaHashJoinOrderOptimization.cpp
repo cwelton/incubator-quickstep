@@ -223,6 +223,21 @@ physical::PhysicalPtr StarSchemaHashJoinOrderOptimization::generatePlan(
             std::unique_ptr<JoinPair> new_join(
                 new JoinPair(probe_table_info, build_table_info));
             if (best_join == nullptr || new_join->isBetterThan(*best_join)) {
+//              if (best_join != nullptr) {
+//                std::cerr << "(" << best_join->probe->estimated_selectivity
+//                          << ", " << best_join->probe->estimated_cardinality << ")"
+//                          << " -- "
+//                          << "(" << best_join->build->estimated_selectivity
+//                          << ", " << best_join->build->estimated_cardinality << ")"
+//                          << "\n";
+//                std::cerr << "REPLACED WITH\n";
+//              }
+//              std::cerr << "(" << new_join->probe->estimated_selectivity
+//                        << ", " << new_join->probe->estimated_cardinality << ")"
+//                        << " -- "
+//                        << "(" << new_join->build->estimated_selectivity
+//                        << ", " << new_join->build->estimated_cardinality << ")"
+//                        << "\n****\n";
               best_join.reset(new_join.release());
             }
           }
@@ -241,6 +256,11 @@ physical::PhysicalPtr StarSchemaHashJoinOrderOptimization::generatePlan(
     // TODO(jianqiao): Handle the case when there is no primary key-foreign key information available.
     CHECK(selected_probe_table_info != nullptr);
     CHECK(selected_build_table_info != nullptr);
+
+//    std::cerr << selected_probe_table_info->estimated_selectivity
+//              << " -- "
+//              << selected_build_table_info->estimated_selectivity
+//              << "\n";
 
 //    std::cerr << selected_probe_table_info->estimated_num_output_attributes
 //              << " -- "
@@ -278,10 +298,10 @@ physical::PhysicalPtr StarSchemaHashJoinOrderOptimization::generatePlan(
 
     if (remaining_tables.size() > 0) {
       P::PhysicalPtr output =
-          P::HashJoin::Create(build_child,
-                              probe_child,
-                              build_attributes,
+          P::HashJoin::Create(probe_child,
+                              build_child,
                               probe_attributes,
+                              build_attributes,
                               nullptr,
                               output_attributes,
                               P::HashJoin::JoinType::kInnerJoin);
@@ -310,10 +330,10 @@ physical::PhysicalPtr StarSchemaHashJoinOrderOptimization::generatePlan(
         }
       }
     } else {
-      return P::HashJoin::Create(build_child,
-                                 probe_child,
-                                 build_attributes,
+      return P::HashJoin::Create(probe_child,
+                                 build_child,
                                  probe_attributes,
+                                 build_attributes,
                                  residual_predicate,
                                  project_expressions,
                                  P::HashJoin::JoinType::kInnerJoin);

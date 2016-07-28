@@ -219,6 +219,23 @@ void addPrimaryKeyInfoForTPCHTables(quickstep::CatalogDatabase *database) {
   }
 }
 
+void addPrimaryKeyInfoForSSBTables(quickstep::CatalogDatabase *database) {
+  const std::vector<std::pair<std::string, std::vector<std::string>>> rel_pkeys = {
+      { "supplier", { "s_suppkey" } },
+      { "customer", { "c_custkey" } },
+      { "part", { "p_partkey" } },
+      { "ddate", { "d_datekey" } }
+  };
+  for (const auto &rel_pair : rel_pkeys) {
+    CatalogRelation *rel = database->getRelationByNameMutable(rel_pair.first);
+    std::vector<quickstep::attribute_id> attrs;
+    for (const auto &pkey : rel_pair.second) {
+      attrs.emplace_back(rel->getAttributeByName(pkey)->getID());
+    }
+    rel->getConstraintsMutable()->setPrimaryKey(attrs);
+  }
+}
+
 int main(int argc, char* argv[]) {
   google::InitGoogleLogging(argv[0]);
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -327,6 +344,7 @@ int main(int argc, char* argv[]) {
   }
 
 //  addPrimaryKeyInfoForTPCHTables(query_processor->getDefaultDatabase());
+//  addPrimaryKeyInfoForSSBTables(query_processor->getDefaultDatabase());
 //  std::string proto_str;
 //  google::protobuf::TextFormat::PrintToString(
 //      query_processor->getDefaultDatabase()->getProto(), &proto_str);

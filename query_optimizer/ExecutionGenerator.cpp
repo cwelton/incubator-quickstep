@@ -599,8 +599,10 @@ void ExecutionGenerator::convertHashJoin(const P::HashJoinPtr &physical_plan) {
   std::vector<attribute_id> probe_attribute_ids;
   std::vector<attribute_id> build_attribute_ids;
 
-  std::vector<attribute_id> probe_original_attribute_ids;
-  std::vector<attribute_id> build_original_attribute_ids;
+  const P::BloomFilterConfig &bloom_filter_config =
+      physical_plan->bloom_filter_config();
+  std::vector<attribute_id> probe_side_bloom_filter_attribute_ids;
+  std::vector<attribute_id> build_side_bloom_filter_attribute_ids;
 
   const CatalogRelation *referenced_stored_probe_relation = nullptr;
   const CatalogRelation *referenced_stored_build_relation = nullptr;
@@ -613,18 +615,6 @@ void ExecutionGenerator::convertHashJoin(const P::HashJoinPtr &physical_plan) {
   const std::vector<E::AttributeReferencePtr> &left_join_attributes =
       physical_plan->left_join_attributes();
   for (const E::AttributeReferencePtr &left_join_attribute : left_join_attributes) {
-    // Try to determine the original stored relation referenced in the Hash Join.
-    referenced_stored_probe_relation =
-        optimizer_context_->catalog_database()->getRelationByName(left_join_attribute->relation_name());
-    if (referenced_stored_probe_relation == nullptr) {
-      // Hash Join optimizations are not possible, if the referenced relation cannot be determined.
-      skip_hash_join_optimization = true;
-    } else {
-      const attribute_id probe_operator_attribute_id =
-          referenced_stored_probe_relation->getAttributeByName(left_join_attribute->attribute_name())->getID();
-      probe_original_attribute_ids.emplace_back(probe_operator_attribute_id);
-    }
-
     const CatalogAttribute *probe_catalog_attribute
         = attribute_substitution_map_[left_join_attribute->id()];
     probe_attribute_ids.emplace_back(probe_catalog_attribute->getID());
@@ -637,18 +627,6 @@ void ExecutionGenerator::convertHashJoin(const P::HashJoinPtr &physical_plan) {
   const std::vector<E::AttributeReferencePtr> &right_join_attributes =
       physical_plan->right_join_attributes();
   for (const E::AttributeReferencePtr &right_join_attribute : right_join_attributes) {
-    // Try to determine the original stored relation referenced in the Hash Join.
-    referenced_stored_build_relation =
-        optimizer_context_->catalog_database()->getRelationByName(right_join_attribute->relation_name());
-    if (referenced_stored_build_relation == nullptr) {
-      // Hash Join optimizations are not possible, if the referenced relation cannot be determined.
-      skip_hash_join_optimization = true;
-    } else {
-      const attribute_id build_operator_attribute_id =
-          referenced_stored_build_relation->getAttributeByName(right_join_attribute->attribute_name())->getID();
-      build_original_attribute_ids.emplace_back(build_operator_attribute_id);
-    }
-
     const CatalogAttribute *build_catalog_attribute
         = attribute_substitution_map_[right_join_attribute->id()];
     build_attribute_ids.emplace_back(build_catalog_attribute->getID());
@@ -656,6 +634,20 @@ void ExecutionGenerator::convertHashJoin(const P::HashJoinPtr &physical_plan) {
     if (build_catalog_attribute->getType().isNullable()) {
       any_build_attributes_nullable = true;
     }
+  }
+
+  for (const auto &bf : bloom_filter_config.probe_side_bloom_filters) {
+    const CatalogAttribute *probe_bf_catalog_attribute
+        = attribute_substitution_map_[bf.attribute->id()];
+    probe_side_bloom_filter_attribute_ids.emplace_back(
+        probe_bf_catalog_attribute->getID());
+  }
+
+  for (const auto &bf : bloom_filter_config.build_side_bloom_filters) {
+    const CatalogAttribute *build_bf_catalog_attribute
+        = attribute_substitution_map_[bf.attribute->id()];
+    build_side_bloom_filter_attribute_ids.emplace_back(
+        build_bf_catalog_attribute->getID());
   }
 
   // Remember key types for call to SimplifyHashTableImplTypeProto() below.
@@ -672,34 +664,7 @@ void ExecutionGenerator::convertHashJoin(const P::HashJoinPtr &physical_plan) {
     key_types.push_back(&left_attribute_type);
   }
 
-  std::size_t probe_cardinality = cost_model_->estimateCardinality(probe_physical);
   std::size_t build_cardinality = cost_model_->estimateCardinality(build_physical);
-  // For inner join, we may swap the probe table and the build table.
-  if (physical_plan->join_type() == P::HashJoin::JoinType::kInnerJoin)  {
-    const bool left_unique_join_attrs =
-        probe_physical->impliesUniqueAttributes(left_join_attributes);
-    const bool right_unique_join_attrs =
-        build_physical->impliesUniqueAttributes(right_join_attributes);
-
-    bool swap_probe_build;
-    if (left_unique_join_attrs != right_unique_join_attrs) {
-      swap_probe_build = left_unique_join_attrs;
-    } else {
-      // Choose the smaller table as the inner build table,
-      // and the other one as the outer probe table.
-      swap_probe_build = (probe_cardinality < build_cardinality);
-    }
-
-    if (swap_probe_build) {
-      // Switch the probe and build physical nodes.
-      std::swap(probe_physical, build_physical);
-      std::swap(probe_cardinality, build_cardinality);
-      std::swap(probe_attribute_ids, build_attribute_ids);
-      std::swap(any_probe_attributes_nullable, any_build_attributes_nullable);
-      std::swap(probe_original_attribute_ids, build_original_attribute_ids);
-      std::swap(referenced_stored_probe_relation, referenced_stored_build_relation);
-    }
-  }
 
   // Convert the residual predicate proto.
   QueryContext::predicate_id residual_predicate_index = QueryContext::kInvalidPredicateId;
@@ -861,8 +826,9 @@ void ExecutionGenerator::convertHashJoin(const P::HashJoinPtr &physical_plan) {
                                            join_operator_index,
                                            referenced_stored_build_relation,
                                            referenced_stored_probe_relation,
-                                           std::move(build_original_attribute_ids),
-                                           std::move(probe_original_attribute_ids),
+                                           bloom_filter_config,
+                                           std::move(build_side_bloom_filter_attribute_ids),
+                                           std::move(probe_side_bloom_filter_attribute_ids),
                                            join_hash_table_index,
                                            star_schema_cost_model_->estimateCardinality(build_physical));
   }
