@@ -318,11 +318,9 @@ class HashTableFactory {
     //                 individual implementations of the hash table constructors.
 
     // Check if there are any build side bloom filter defined on the hash table.
-    if (proto.build_side_bloom_filters_size() > 0) {
-      CHECK_EQ(1u, proto.build_side_bloom_filters_size());
+    if (proto.build_side_bloom_filter_id_size() > 0) {
       hash_table->enableBuildSideBloomFilter();
-      hash_table->setBuildSideBloomFilter(
-          bloom_filters[proto.build_side_bloom_filters(0).bloom_filter_id()].get());
+      hash_table->setBuildSideBloomFilter(bloom_filters[proto.build_side_bloom_filter_id(0)].get());
     }
 
     // Check if there are any probe side bloom filters defined on the hash table.
@@ -335,8 +333,7 @@ class HashTableFactory {
         hash_table->addProbeSideBloomFilter(
             bloom_filters[probe_side_bloom_filter.bloom_filter_id()].get());
 
-        // Add the attribute ids corresponding to this probe bloom filter.
-        hash_table->addProbeSideAttributeIds(probe_side_bloom_filter.attr_id());
+        hash_table->addProbeSideAttributeId(probe_side_bloom_filter.attr_id());
       }
     }
 

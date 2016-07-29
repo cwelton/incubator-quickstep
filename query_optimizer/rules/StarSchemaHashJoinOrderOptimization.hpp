@@ -75,12 +75,14 @@ class StarSchemaHashJoinOrderOptimization : public Rule<physical::Physical> {
               const physical::PhysicalPtr &table_in,
               const std::size_t estimated_cardinality_in,
               const double estimated_selectivity_in,
-              const std::size_t estimated_num_output_attributes_in)
+              const std::size_t estimated_num_output_attributes_in,
+              const bool is_aggregation_in)
         : table_info_id(table_info_id_in),
           table(table_in),
           estimated_cardinality(estimated_cardinality_in),
           estimated_selectivity(estimated_selectivity_in),
-          estimated_num_output_attributes(estimated_num_output_attributes_in) {
+          estimated_num_output_attributes(estimated_num_output_attributes_in),
+          is_aggregation(is_aggregation_in) {
     }
 
     const std::size_t table_info_id;
@@ -88,6 +90,7 @@ class StarSchemaHashJoinOrderOptimization : public Rule<physical::Physical> {
     std::size_t estimated_cardinality;
     double estimated_selectivity;
     std::size_t estimated_num_output_attributes;
+    bool is_aggregation;
   };
 
   struct JoinPair {
@@ -107,13 +110,17 @@ class StarSchemaHashJoinOrderOptimization : public Rule<physical::Physical> {
         return rhs_has_large_output;
       }
 
-//      const bool lhs_has_small_build =
-//          !lhs_has_large_output && lhs.build->estimated_cardinality < 0x1000;
-//      const bool rhs_has_small_build =
-//          !rhs_has_large_output && rhs.build->estimated_cardinality < 0x1000;
-//      if (lhs_has_small_build != rhs_has_small_build) {
-//        return lhs_has_small_build;
-//      }
+      const bool lhs_has_small_build =
+          !lhs_has_large_output && lhs.build->estimated_cardinality < 0x100;
+      const bool rhs_has_small_build =
+          !rhs_has_large_output && rhs.build->estimated_cardinality < 0x100;
+      if (lhs_has_small_build != rhs_has_small_build) {
+        return lhs_has_small_build;
+      }
+
+      if (lhs.probe->is_aggregation != rhs.probe->is_aggregation) {
+        return lhs.probe->is_aggregation;
+      }
 
       if (lhs.probe->estimated_cardinality != rhs.probe->estimated_cardinality) {
         return lhs.probe->estimated_cardinality < rhs.probe->estimated_cardinality;

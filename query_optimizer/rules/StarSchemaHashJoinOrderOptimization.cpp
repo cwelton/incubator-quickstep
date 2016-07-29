@@ -150,7 +150,8 @@ physical::PhysicalPtr StarSchemaHashJoinOrderOptimization::generatePlan(
         cost_model_->estimateCardinality(tables[i]),
         cost_model_->estimateSelectivity(tables[i]),
         CountSharedAttributes(join_group.referenced_attributes,
-                              tables[i]->getOutputAttributes()));
+                              tables[i]->getOutputAttributes()),
+        tables[i]->getPhysicalType() == physical::PhysicalType::kAggregate);
   }
 
   // Auxiliary mapping info.
@@ -316,6 +317,7 @@ physical::PhysicalPtr StarSchemaHashJoinOrderOptimization::generatePlan(
       selected_probe_table_info->estimated_num_output_attributes =
           CountSharedAttributes(join_group.referenced_attributes,
                                 output->getOutputAttributes());
+      selected_probe_table_info->is_aggregation = false;
 
       remaining_tables.emplace(selected_probe_table_info);
 

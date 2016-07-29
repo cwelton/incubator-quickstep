@@ -41,14 +41,12 @@
 #include "types/TypedValue.hpp"
 #include "utility/BloomFilter.hpp"
 #include "utility/BloomFilterAdapter.hpp"
-#include "utility/EventProfiler.hpp"
 #include "utility/HashPair.hpp"
 #include "utility/Macros.hpp"
 
 namespace quickstep {
 
 DECLARE_int64(bloom_adapter_batch_size);
-DECLARE_bool(adapt_bloom_filters);
 
 /** \addtogroup Storage
  *  @{
@@ -1048,7 +1046,7 @@ class HashTable : public HashTableBase<resizable,
    * @param probe_attribute_ids The vector of attribute ids to use for probing
    *        the bloom filter.
    **/
-  inline void addProbeSideAttributeIds(const attribute_id &probe_attribute_id) {
+  inline void addProbeSideAttributeId(const attribute_id probe_attribute_id) {
     probe_attribute_ids_.push_back(probe_attribute_id);
   }
 
@@ -2263,7 +2261,7 @@ void HashTable<ValueT, resizable, serializable, force_key_copy, allow_duplicate_
       for (const auto &probe_attr : probe_attribute_ids_) {
         auto val_and_size =
             accessor->template getUntypedValueAndByteLengthAtAbsolutePosition<false>(0, probe_attr);
-        attr_size_vector.push_back(val_and_size.second);
+        attr_size_vector.emplace_back(val_and_size.second);
       }
 
       bloom_filter_adapter.reset(new BloomFilterAdapter(
@@ -2280,30 +2278,18 @@ void HashTable<ValueT, resizable, serializable, force_key_copy, allow_duplicate_
       std::uint32_t num_tuples_left = accessor->getNumTuples();
       std::vector<tuple_id> batch(num_tuples_left);
 
-      auto *container = simple_profiler.getContainer();
-      auto *line = container->getEventLine(0);
-
       do {
-        const std::uint32_t batch_size =
+        std::uint32_t batch_size =
             batch_size_try < num_tuples_left ? batch_size_try : num_tuples_left;
         for (std::size_t i = 0; i < batch_size; ++i) {
           accessor->next();
           batch.push_back(accessor->getCurrentPosition());
         }
 
-        line->emplace_back();
-        std::size_t num_hits;
-        if (FLAGS_adapt_bloom_filters) {
-          num_hits = bloom_filter_adapter->bulkProbe<true>(accessor, batch);
-        } else {
-          num_hits = bloom_filter_adapter->bulkProbe<false>(accessor, batch);
-        }
-        line->back().setPayload(num_hits+0);
-        line->back().endEvent();
-//        std::size_t num_hits = batch_size;
+        std::size_t num_hits = bloom_filter_adapter->bulkProbe<true>(accessor, batch);
 
-        for (std::size_t i = 0; i < num_hits; ++i){
-          const tuple_id probe_tid = batch[i];
+        for (std::size_t t = 0; t < num_hits; ++t){
+          tuple_id probe_tid = batch[t];
           TypedValue key = accessor->getTypedValueAtAbsolutePosition(key_attr_id, probe_tid);
           if (check_for_null_keys && key.isNull()) {
             continue;
@@ -2320,6 +2306,7 @@ void HashTable<ValueT, resizable, serializable, force_key_copy, allow_duplicate_
               break;
           }
         }
+        batch.clear();
         num_tuples_left -= batch_size;
         batch_size_try = batch_size * 2;
       } while (!accessor->iterationFinished());

@@ -51,24 +51,24 @@ P::PhysicalPtr AttachBloomFilters::apply(const P::PhysicalPtr &input) {
   visitProducer(input, 0);
   visitConsumer(input);
 
-  for (const auto &info_vec_pair : consumers_) {
-    std::cerr << "--------\n"
-              << "Node " << info_vec_pair.first->getName()
-              << " " << info_vec_pair.first << "\n";
-
-    for (const auto &info : info_vec_pair.second) {
-      std::cerr << info.attribute->attribute_alias();
-      if (info.attribute->id() != info.source_attribute->id()) {
-        std::cerr << "{FROM " << info.source_attribute->attribute_alias() << "}";
-      }
-      if (info.from_sibling) {
-        std::cerr << " sibling";
-      }
-      std::cerr << " @" << info.source << "[" << info.depth << "]"
-                << ": " << info.selectivity << "\n";
-    }
-    std::cerr << "********\n";
-  }
+//  for (const auto &info_vec_pair : consumers_) {
+//    std::cerr << "--------\n"
+//              << "Node " << info_vec_pair.first->getName()
+//              << " " << info_vec_pair.first << "\n";
+//
+//    for (const auto &info : info_vec_pair.second) {
+//      std::cerr << info.attribute->attribute_alias();
+//      if (info.attribute->id() != info.source_attribute->id()) {
+//        std::cerr << "{FROM " << info.source_attribute->attribute_alias() << "}";
+//      }
+//      if (info.from_sibling) {
+//        std::cerr << " sibling";
+//      }
+//      std::cerr << " @" << info.source << "[" << info.depth << "]"
+//                << ": " << info.selectivity << "\n";
+//    }
+//    std::cerr << "********\n";
+//  }
 
   return visitAndAttach(input);
 }
@@ -192,9 +192,20 @@ void AttachBloomFilters::visitConsumer(const P::PhysicalPtr &node) {
                                             info.attribute);
       }
     }
+  }
 
+  P::PhysicalPtr consumer_child = nullptr;
+  if (node->getPhysicalType() == P::PhysicalType::kHashJoin) {
+    consumer_child = std::static_pointer_cast<const P::HashJoin>(node)->left();
+  }
+  if (node->getPhysicalType() == P::PhysicalType::kAggregate) {
+    consumer_child = std::static_pointer_cast<const P::Aggregate>(node)->input();
+  }
+
+  if (consumer_child != nullptr) {
     // Decide attaches
-    if (cost_model_->estimateCardinality(consumer_child) > 200000000 &&
+    auto &consumer_bloom_filters = consumers_[consumer_child];
+    if (cost_model_->estimateCardinality(consumer_child) > 10000000 &&
         !consumer_bloom_filters.empty()) {
       std::map<E::AttributeReferencePtr, const BloomFilterInfo*> filters;
       for (const auto &info : consumer_bloom_filters) {
@@ -240,10 +251,10 @@ P::PhysicalPtr AttachBloomFilters::visitAndAttach(const physical::PhysicalPtr &n
   if (node->getPhysicalType() == P::PhysicalType::kHashJoin) {
     const auto attach_it = attaches_.find(node);
     if (attach_it != attaches_.end()) {
-      for (const auto& item : attach_it->second.probe_side_bloom_filters) {
-        std::cout << "Attach probe from " << item.builder
-                  << " to " << node << "\n";
-      }
+//      for (const auto& item : attach_it->second.probe_side_bloom_filters) {
+//        std::cout << "Attach probe from " << item.builder
+//                  << " to " << node << "\n";
+//      }
 
       const P::HashJoinPtr hash_join =
           std::static_pointer_cast<const P::HashJoin>(node);
@@ -255,6 +266,25 @@ P::PhysicalPtr AttachBloomFilters::visitAndAttach(const physical::PhysicalPtr &n
           hash_join->residual_predicate(),
           hash_join->project_expressions(),
           hash_join->join_type(),
+          attach_it->second);
+    }
+  }
+
+  if (node->getPhysicalType() == P::PhysicalType::kAggregate) {
+    const auto attach_it = attaches_.find(node);
+    if (attach_it != attaches_.end()) {
+//      for (const auto& item : attach_it->second.probe_side_bloom_filters) {
+//        std::cout << "Attach probe from " << item.builder
+//                  << " to " << node << "\n";
+//      }
+
+      const P::AggregatePtr aggregate =
+          std::static_pointer_cast<const P::Aggregate>(node);
+      return P::Aggregate::Create(
+          aggregate->input(),
+          aggregate->grouping_expressions(),
+          aggregate->aggregate_expressions(),
+          aggregate->filter_predicate(),
           attach_it->second);
     }
   }

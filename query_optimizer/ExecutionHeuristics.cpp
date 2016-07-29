@@ -65,10 +65,7 @@ void ExecutionHeuristics::optimizeExecutionPlan(QueryPlan *query_plan,
                          bloom_filter_config.builder),
           std::make_pair(bloom_filter_id, info.build_operator_index_));
 
-      auto *build_side_bloom_filter = hash_table_proto->add_build_side_bloom_filters();
-      build_side_bloom_filter->set_bloom_filter_id(bloom_filter_id);
-      build_side_bloom_filter->set_attr_id(info.build_side_bloom_filter_ids_[i]);
-
+      hash_table_proto->add_build_side_bloom_filter_id(bloom_filter_id);
       std::cout << "Build " << build_side_bf.attribute->toString()
                 << " @" << bloom_filter_config.builder << "\n";
     }
@@ -83,7 +80,7 @@ void ExecutionHeuristics::optimizeExecutionPlan(QueryPlan *query_plan,
       auto *probe_side_bloom_filter = hash_table_proto->add_probe_side_bloom_filters();
       const auto &probe_side_bf =
           bloom_filter_config.probe_side_bloom_filters[i];
-      std::cout << "Probe " << probe_side_bf.attribute->toString()
+      std::cout << "HashJoin probe " << probe_side_bf.attribute->toString()
                 << " @" << probe_side_bf.builder << "\n";
 
       const auto &build_side_info =
@@ -92,9 +89,36 @@ void ExecutionHeuristics::optimizeExecutionPlan(QueryPlan *query_plan,
                               probe_side_bf.builder));
       probe_side_bloom_filter->set_bloom_filter_id(build_side_info.first);
       probe_side_bloom_filter->set_attr_id(info.probe_side_bloom_filter_ids_[i]);
-      std::cout << "Probe attr_id = " << info.probe_side_bloom_filter_ids_[i] << "\n";
+      std::cout << "HashJoin probe attr_id = " << info.probe_side_bloom_filter_ids_[i] << "\n";
 
       query_plan->addDirectDependency(info.join_operator_index_,
+                                      build_side_info.second,
+                                      true /* is_pipeline_breaker */);
+    }
+  }
+
+  for (const auto &info : aggregates_) {
+    auto *aggregate_proto =
+        query_context_proto->mutable_aggregation_states(info.aggregate_state_id_);
+    const auto &bloom_filter_config = info.bloom_filter_config_;
+
+    for (std::size_t i = 0; i < info.bloom_filter_ids_.size(); ++i) {
+      auto *bloom_filter = aggregate_proto->add_bloom_filters();
+      const auto &bf =
+          bloom_filter_config.probe_side_bloom_filters[i];
+      std::cout << "Aggregate probe " << bf.attribute->toString()
+                << " @" << bf.builder << "\n";
+
+      const auto &build_side_info =
+           bloom_filter_map.at(
+               std::make_pair(bf.source_attribute->id(),
+                              bf.builder));
+      bloom_filter->set_bloom_filter_id(build_side_info.first);
+      bloom_filter->set_attr_id(info.bloom_filter_ids_[i]);
+      std::cout << "Aggregate probe attr_id = "
+                << info.bloom_filter_ids_[i] << "\n";
+
+      query_plan->addDirectDependency(info.aggregate_operator_index_,
                                       build_side_info.second,
                                       true /* is_pipeline_breaker */);
     }
