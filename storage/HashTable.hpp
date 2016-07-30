@@ -1020,8 +1020,12 @@ class HashTable : public HashTableBase<resizable,
    *
    * @param bloom_filter The pointer to the bloom filter.
    **/
-  inline void setBuildSideBloomFilter(BloomFilter *bloom_filter) {
-    build_bloom_filter_ = bloom_filter;
+  inline void addBuildSideBloomFilter(BloomFilter *bloom_filter) {
+    build_bloom_filters_.emplace_back(bloom_filter);
+  }
+
+  inline void addBuildSideAttributeId(const attribute_id build_attribute_id) {
+    build_attribute_ids_.push_back(build_attribute_id);
   }
 
   /**
@@ -1333,7 +1337,8 @@ class HashTable : public HashTableBase<resizable,
   // Data structures used for bloom filter optimized semi-joins.
   bool has_build_side_bloom_filter_ = false;
   bool has_probe_side_bloom_filter_ = false;
-  BloomFilter *build_bloom_filter_;
+  std::vector<BloomFilter *> build_bloom_filters_;
+  std::vector<attribute_id> build_attribute_ids_;
   std::vector<const BloomFilter*> probe_bloom_filters_;
   std::vector<attribute_id> probe_attribute_ids_;
 
@@ -1481,11 +1486,26 @@ HashTablePutResult HashTable<ValueT, resizable, serializable, force_key_copy, al
                                                         &prealloc_state);
       }
     }
-    std::unique_ptr<BloomFilter> thread_local_bloom_filter;
+
     if (has_build_side_bloom_filter_) {
-      thread_local_bloom_filter.reset(new BloomFilter(build_bloom_filter_->getNumberOfHashes(),
-                                                      build_bloom_filter_->getBitArraySize()));
+      for (std::size_t i = 0; i < build_bloom_filters_.size(); ++i) {
+        auto *build_bloom_filter = build_bloom_filters_[i];
+        std::unique_ptr<BloomFilter> thread_local_bloom_filter(
+            new BloomFilter(build_bloom_filter->getNumberOfHashes(),
+                            build_bloom_filter->getBitArraySize()));
+        const auto &build_attr = build_attribute_ids_[i];
+        const std::size_t attr_size =
+            accessor->template getUntypedValueAndByteLengthAtAbsolutePosition<false>(0, build_attr).second;
+        while (accessor->next()) {
+          thread_local_bloom_filter->insertUnSafe(
+              static_cast<const std::uint8_t *>(accessor->getUntypedValue(build_attr)),
+              attr_size);
+        }
+        build_bloom_filter->bitwiseOr(thread_local_bloom_filter.get());
+        accessor->beginIteration();
+      }
     }
+
     if (resizable) {
       while (result == HashTablePutResult::kOutOfSpace) {
         {
@@ -1501,11 +1521,6 @@ HashTablePutResult HashTable<ValueT, resizable, serializable, force_key_copy, al
                                        variable_size,
                                        (*functor)(*accessor),
                                        using_prealloc ? &prealloc_state : nullptr);
-            // Insert into bloom filter, if enabled.
-            if (has_build_side_bloom_filter_) {
-              thread_local_bloom_filter->insertUnSafe(static_cast<const std::uint8_t *>(key.getDataPtr()),
-                                                      key.getDataSize());
-            }
             if (result == HashTablePutResult::kDuplicateKey) {
               DEBUG_ASSERT(!using_prealloc);
               return result;
@@ -1531,19 +1546,10 @@ HashTablePutResult HashTable<ValueT, resizable, serializable, force_key_copy, al
                                    variable_size,
                                    (*functor)(*accessor),
                                    using_prealloc ? &prealloc_state : nullptr);
-        // Insert into bloom filter, if enabled.
-        if (has_build_side_bloom_filter_) {
-          thread_local_bloom_filter->insertUnSafe(static_cast<const std::uint8_t *>(key.getDataPtr()),
-                                                  key.getDataSize());
-        }
         if (result != HashTablePutResult::kOK) {
           return result;
         }
       }
-    }
-    // Update the build side bloom filter with thread local copy, if available.
-    if (has_build_side_bloom_filter_) {
-      build_bloom_filter_->bitwiseOr(thread_local_bloom_filter.get());
     }
 
     return HashTablePutResult::kOK;
@@ -1610,6 +1616,26 @@ HashTablePutResult HashTable<ValueT, resizable, serializable, force_key_copy, al
                                                         &prealloc_state);
       }
     }
+
+    if (has_build_side_bloom_filter_) {
+      for (std::size_t i = 0; i < build_bloom_filters_.size(); ++i) {
+        auto *build_bloom_filter = build_bloom_filters_[i];
+        std::unique_ptr<BloomFilter> thread_local_bloom_filter(
+            new BloomFilter(build_bloom_filter->getNumberOfHashes(),
+                            build_bloom_filter->getBitArraySize()));
+        const auto &build_attr = build_attribute_ids_[i];
+        const std::size_t attr_size =
+            accessor->template getUntypedValueAndByteLengthAtAbsolutePosition<false>(0, build_attr).second;
+        while (accessor->next()) {
+          thread_local_bloom_filter->insertUnSafe(
+              static_cast<const std::uint8_t *>(accessor->getUntypedValue(build_attr)),
+              attr_size);
+        }
+        build_bloom_filter->bitwiseOr(thread_local_bloom_filter.get());
+        accessor->beginIteration();
+      }
+    }
+
     if (resizable) {
       while (result == HashTablePutResult::kOutOfSpace) {
         {

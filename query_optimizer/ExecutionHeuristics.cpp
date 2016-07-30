@@ -65,7 +65,9 @@ void ExecutionHeuristics::optimizeExecutionPlan(QueryPlan *query_plan,
                          bloom_filter_config.builder),
           std::make_pair(bloom_filter_id, info.build_operator_index_));
 
-      hash_table_proto->add_build_side_bloom_filter_id(bloom_filter_id);
+      auto *build_side_bloom_filter = hash_table_proto->add_build_side_bloom_filters();
+      build_side_bloom_filter->set_bloom_filter_id(bloom_filter_id);
+      build_side_bloom_filter->set_attr_id(info.build_side_bloom_filter_ids_[i]);
       std::cout << "Build " << build_side_bf.attribute->toString()
                 << " @" << bloom_filter_config.builder << "\n";
     }
