@@ -727,7 +727,7 @@ void ExecutionGenerator::convertHashJoin(const P::HashJoinPtr &physical_plan) {
         build_relation->getAttributeById(build_attribute)->getType().getProto());
   }
 
-  hash_table_proto->set_estimated_num_entries(build_cardinality);
+  hash_table_proto->set_estimated_num_entries(physical_plan->estimated_right_cardinality());
 
   // Create three operators.
   const QueryPlan::DAGNodeIndex build_operator_index =

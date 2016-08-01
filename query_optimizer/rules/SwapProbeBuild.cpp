@@ -43,8 +43,23 @@ P::PhysicalPtr SwapProbeBuild::applyToNode(const P::PhysicalPtr &input) {
                                                   left_join_attributes,
                                                   hash_join->residual_predicate(),
                                                   hash_join->project_expressions(),
-                                                  hash_join->join_type());
+                                                  hash_join->join_type(),
+                                                  left_cardinality);
       LOG_APPLYING_RULE(input, output);
+      return output;
+    }
+    else {
+      P::PhysicalPtr output = P::HashJoin::Create(left,
+                                                  right,
+                                                  hash_join->left_join_attributes(),
+                                                  hash_join->right_join_attributes(),
+                                                  hash_join->residual_predicate(),
+                                                  hash_join->project_expressions(),
+                                                  hash_join->join_type(),
+                                                  right_cardinality);
+      // Since we did not apply the swap logic, we will not report it to the log.
+      // However we also did not ignored the rule completely, therefore we will not
+      // log that we ignored the rule.
       return output;
     }
   }

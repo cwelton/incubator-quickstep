@@ -20,6 +20,7 @@
 #ifndef QUICKSTEP_QUERY_OPTIMIZER_PHYSICAL_HASHJOIN_HPP_
 #define QUICKSTEP_QUERY_OPTIMIZER_PHYSICAL_HASHJOIN_HPP_
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -106,6 +107,22 @@ class HashJoin : public BinaryJoin {
     return join_type_;
   }
 
+  /**
+   * @return Estimated number of tuples from the right (build)'s side.
+   */
+  std::size_t estimated_right_cardinality() const {
+    return estimated_right_cardinality_;
+  }
+
+  /**
+   * @brief Sets the build side cardinality for using as a hint in a later stage.
+   *
+   * @param estimated_right_cardinality New build side estimated cardinality to be set.
+   */
+  void set_estimated_right_cardinality(const std::size_t estimated_right_cardinality) {
+    estimated_right_cardinality_ = estimated_right_cardinality;
+  }
+
   PhysicalPtr copyWithNewChildren(
       const std::vector<PhysicalPtr> &new_children) const override {
     DCHECK_EQ(children().size(), new_children.size());
@@ -115,7 +132,8 @@ class HashJoin : public BinaryJoin {
                   right_join_attributes_,
                   residual_predicate_,
                   project_expressions(),
-                  join_type_);
+                  join_type_,
+                  estimated_right_cardinality_);
   }
 
   std::vector<expressions::AttributeReferencePtr> getReferencedAttributes() const override;
@@ -144,7 +162,8 @@ class HashJoin : public BinaryJoin {
       const std::vector<expressions::AttributeReferencePtr> &right_join_attributes,
       const expressions::PredicatePtr &residual_predicate,
       const std::vector<expressions::NamedExpressionPtr> &project_expressions,
-      const JoinType join_type) {
+      const JoinType join_type,
+      const std::size_t estimated_right_cardinality = 0u) {
     return HashJoinPtr(
         new HashJoin(left,
                      right,
@@ -152,7 +171,8 @@ class HashJoin : public BinaryJoin {
                      right_join_attributes,
                      residual_predicate,
                      project_expressions,
-                     join_type));
+                     join_type,
+                     estimated_right_cardinality));
   }
 
  protected:
@@ -172,18 +192,21 @@ class HashJoin : public BinaryJoin {
       const std::vector<expressions::AttributeReferencePtr> &right_join_attributes,
       const expressions::PredicatePtr &residual_predicate,
       const std::vector<expressions::NamedExpressionPtr> &project_expressions,
-      const JoinType join_type)
+      const JoinType join_type,
+      const std::size_t estimated_right_cardinality)
       : BinaryJoin(left, right, project_expressions),
         left_join_attributes_(left_join_attributes),
         right_join_attributes_(right_join_attributes),
         residual_predicate_(residual_predicate),
-        join_type_(join_type) {
+        join_type_(join_type),
+        estimated_right_cardinality_(estimated_right_cardinality) {
   }
 
   std::vector<expressions::AttributeReferencePtr> left_join_attributes_;
   std::vector<expressions::AttributeReferencePtr> right_join_attributes_;
   expressions::PredicatePtr residual_predicate_;
   JoinType join_type_;
+  std::size_t estimated_right_cardinality_;
 
   DISALLOW_COPY_AND_ASSIGN(HashJoin);
 };
