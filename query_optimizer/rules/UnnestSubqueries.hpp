@@ -219,6 +219,7 @@ class DeOuterAttributeReference : public BottomUpRule<expressions::Expression> {
 
  protected:
   expressions::ExpressionPtr applyToNode(const expressions::ExpressionPtr &input) override;
+  void init(const expressions::ExpressionPtr &input) override;
 
  private:
   const bool allow_outer_reference_;

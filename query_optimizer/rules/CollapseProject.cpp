@@ -54,5 +54,10 @@ L::LogicalPtr CollapseProject::applyToNode(const L::LogicalPtr &input) {
   return input;
 }
 
+void CollapseProject::init(const L::LogicalPtr &input) {
+  // Do nothing.
+  return;
+}
+
 }  // namespace optimizer
 }  // namespace quickstep

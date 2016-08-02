@@ -6,7 +6,7 @@
 #include "query_optimizer/physical/Physical.hpp"
 #include "query_optimizer/rules/Rule.hpp"
 #include "query_optimizer/rules/BottomUpRule.hpp"
-#include "query_optimizer/cost_model/StarSchemaSimpleCostModel.hpp"
+#include "query_optimizer/cost_model/SimpleCostModel.hpp"
 #include "utility/Macros.hpp"
 
 namespace quickstep {
@@ -33,11 +33,12 @@ class SwapProbeBuild : public BottomUpRule<P::Physical> {
 
  protected:
   P::PhysicalPtr applyToNode(const P::PhysicalPtr &input) override;
+  void init(const P::PhysicalPtr &input) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SwapProbeBuild);
+  std::unique_ptr<C::SimpleCostModel> cost_model_;
 
-  std::unique_ptr<C::StarSchemaSimpleCostModel> cost_model_;
+  DISALLOW_COPY_AND_ASSIGN(SwapProbeBuild);
 };
 
 }  // namespace optimizer

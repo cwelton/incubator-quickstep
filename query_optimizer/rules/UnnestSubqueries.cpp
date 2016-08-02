@@ -790,5 +790,9 @@ E::ExpressionPtr DeOuterAttributeReference::applyToNode(const E::ExpressionPtr &
   return input;
 }
 
+void DeOuterAttributeReference::init(const E::ExpressionPtr &input) {
+  return;
+}
+
 }  // namespace optimizer
 }  // namespace quickstep

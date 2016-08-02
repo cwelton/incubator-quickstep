@@ -48,5 +48,10 @@ E::ExpressionPtr UpdateExpression::applyToNode(const E::ExpressionPtr &input) {
   return input;
 }
 
+void UpdateExpression::init(const E::ExpressionPtr &input) {
+  // Do nothing.
+  return;
+}
+
 }  // namespace optimizer
 }  // namespace quickstep

@@ -18,17 +18,12 @@ namespace optimizer {
 P::PhysicalPtr SwapProbeBuild::applyToNode(const P::PhysicalPtr &input) {
   P::HashJoinPtr hash_join;
 
-  if (P::SomeHashJoin::MatchesWithConditionalCast(input, &hash_join)) {
+  if (P::SomeHashJoin::MatchesWithConditionalCast(input, &hash_join)
+      && hash_join->join_type() == P::HashJoin::JoinType::kInnerJoin) {
     P::PhysicalPtr left = hash_join->left();
     P::PhysicalPtr right = hash_join->right();
 
-    P::TopLevelPlanPtr top_level;
-    if (P::SomeTopLevelPlan::MatchesWithConditionalCast(input, &top_level)) {
-      cost_model_.reset(new C::StarSchemaSimpleCostModel(top_level->shared_subplans()));
-    } else {
-      std::vector<P::PhysicalPtr> plans = {input};
-      cost_model_.reset(new C::StarSchemaSimpleCostModel(plans));
-    }
+
 
     std::size_t left_cardinality = cost_model_->estimateCardinality(left);
     std::size_t right_cardinality = cost_model_->estimateCardinality(right);
@@ -43,29 +38,26 @@ P::PhysicalPtr SwapProbeBuild::applyToNode(const P::PhysicalPtr &input) {
                                                   left_join_attributes,
                                                   hash_join->residual_predicate(),
                                                   hash_join->project_expressions(),
-                                                  hash_join->join_type(),
-                                                  left_cardinality);
+                                                  hash_join->join_type());
       LOG_APPLYING_RULE(input, output);
-      return output;
-    }
-    else {
-      P::PhysicalPtr output = P::HashJoin::Create(left,
-                                                  right,
-                                                  hash_join->left_join_attributes(),
-                                                  hash_join->right_join_attributes(),
-                                                  hash_join->residual_predicate(),
-                                                  hash_join->project_expressions(),
-                                                  hash_join->join_type(),
-                                                  right_cardinality);
-      // Since we did not apply the swap logic, we will not report it to the log.
-      // However we also did not ignored the rule completely, therefore we will not
-      // log that we ignored the rule.
       return output;
     }
   }
 
   LOG_IGNORING_RULE(input);
   return input;
+}
+
+void SwapProbeBuild::init(const P::PhysicalPtr &input) {
+  if (cost_model_ == nullptr) {
+    P::TopLevelPlanPtr top_level;
+    if (P::SomeTopLevelPlan::MatchesWithConditionalCast(input, &top_level)) {
+      cost_model_.reset(new C::SimpleCostModel(top_level->shared_subplans()));
+    } else {
+      std::vector<P::PhysicalPtr> plans = {input};
+      cost_model_.reset(new C::SimpleCostModel(plans));
+    }
+  }
 }
 
 }  // namespace optimizer

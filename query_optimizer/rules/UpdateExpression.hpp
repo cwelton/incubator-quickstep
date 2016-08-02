@@ -53,6 +53,7 @@ class UpdateExpression : public BottomUpRule<expressions::Expression> {
 
  protected:
   expressions::ExpressionPtr applyToNode(const expressions::ExpressionPtr &input) override;
+  void init(const expressions::ExpressionPtr &input) override;
 
  private:
   const std::unordered_map<expressions::ExprId, expressions::ExpressionPtr> &substitution_map_;

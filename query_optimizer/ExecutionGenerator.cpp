@@ -604,6 +604,8 @@ void ExecutionGenerator::convertHashJoin(const P::HashJoinPtr &physical_plan) {
   const CatalogRelation *referenced_stored_probe_relation = nullptr;
   const CatalogRelation *referenced_stored_build_relation = nullptr;
 
+  std::size_t build_cardinality = cost_model_->estimateCardinality(build_physical);
+
   bool any_probe_attributes_nullable = false;
   bool any_build_attributes_nullable = false;
 
@@ -727,7 +729,7 @@ void ExecutionGenerator::convertHashJoin(const P::HashJoinPtr &physical_plan) {
         build_relation->getAttributeById(build_attribute)->getType().getProto());
   }
 
-  hash_table_proto->set_estimated_num_entries(physical_plan->estimated_right_cardinality());
+  hash_table_proto->set_estimated_num_entries(build_cardinality);
 
   // Create three operators.
   const QueryPlan::DAGNodeIndex build_operator_index =

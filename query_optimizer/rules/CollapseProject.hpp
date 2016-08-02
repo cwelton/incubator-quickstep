@@ -43,6 +43,7 @@ class CollapseProject : public BottomUpRule<logical::Logical> {
 
  protected:
   logical::LogicalPtr applyToNode(const logical::LogicalPtr &input) override;
+  void init(const logical::LogicalPtr &input) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CollapseProject);
